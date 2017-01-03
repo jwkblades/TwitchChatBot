@@ -33,10 +33,18 @@ int main(void)
 	const int bufferLength = 1024;
 	char* buffer = new char[bufferLength];
 
-	int receivedBytes = twitchConnection.receive(buffer, bufferLength - 1);
-	buffer[receivedBytes] = '\0';
+	while (twitchConnection.connected())
+	{
+		int receivedBytes = twitchConnection.receive(buffer, bufferLength - 1);
+		if (receivedBytes == 0)
+		{
+			usleep(30);
+			continue;
+		}
+		buffer[receivedBytes] = '\0';
 
-	cout << "Received " << receivedBytes << " bytes: " << endl << buffer << endl;
+		cout << "Received " << receivedBytes << " bytes: " << endl << buffer << endl;
+	}
 
 	twitchConnection.close();
 	delete [] buffer;
