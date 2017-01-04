@@ -13,6 +13,7 @@ int main(void)
 
 	Socket twitchConnection;
 	Address commandParser("commandParser");
+	PostOffice::instance()->registerAddress(commandParser);
 	Address transceiver("transceiver");
 
 	auto transceiverLambda = [&twitchConnection, commandParser, transceiver](void) -> void
@@ -65,25 +66,29 @@ int main(void)
 
 			std::string currentMessage = "";
 			std::stringstream s(buffer);
-			std::getline(s, currentMessage, '\n');
-			incompleteMessage += currentMessage;
-
-			if (!incompleteMessage.empty() && incompleteMessage.back() == '\r')
+			do
 			{
-				incompleteMessage = incompleteMessage.substr(0, incompleteMessage.size() - 1);
-				if (PostOffice::isValidInstance(postOffice))
-				{
-					Message msg(incompleteMessage.c_str(), incompleteMessage.size() + 1);
-					postOffice->sendMessage(commandParser, msg);
-				}
-				else
-				{
-					cout << "Invalid PostOffice instance." << endl;
-					return;
-				}
+				std::getline(s, currentMessage, '\n');
+				incompleteMessage += currentMessage;
 
-				incompleteMessage = "";
-			}
+				if (!incompleteMessage.empty() && incompleteMessage.back() == '\r')
+				{
+					incompleteMessage = incompleteMessage.substr(0, incompleteMessage.size() - 1);
+					if (PostOffice::isValidInstance(postOffice))
+					{
+						cout << "Sending incoming command '" << incompleteMessage << "' to " << commandParser << endl;
+						Message msg(incompleteMessage.c_str(), incompleteMessage.size() + 1);
+						postOffice->sendMessage(commandParser, msg);
+					}
+					else
+					{
+						cout << "Invalid PostOffice instance." << endl;
+						return;
+					}
+
+					incompleteMessage = "";
+				}
+			} while (!s.eof());
 
 			cout << "Received " << receivedBytes << " bytes: " << endl << buffer << endl;
 		}
