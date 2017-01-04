@@ -10,8 +10,7 @@ public:
 	RAIIMutex(const void* memoryLocation);
 	~RAIIMutex(void);
 private:
-	static std::map<const void*, std::mutex> oMutexMap;
-	static std::mutex oMapLock;
+	static std::mutex* retrieveLockFor(const void* location);
 	const void* mMemoryLocation;
 };
 

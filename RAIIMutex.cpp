@@ -1,23 +1,30 @@
 #include "RAIIMutex.h"
 
-std::map<const void*, std::mutex> RAIIMutex::oMutexMap;
-std::mutex RAIIMutex::oMapLock;
-
 RAIIMutex::RAIIMutex(const void* memoryLocation):
 	mMemoryLocation(memoryLocation)
 {
-	oMapLock.lock();
-	std::mutex* lock = &oMutexMap[mMemoryLocation];
-	oMapLock.unlock();
-
-	lock->lock();
+	retrieveLockFor(mMemoryLocation)->lock();
 }
 
 RAIIMutex::~RAIIMutex(void)
 {
+	retrieveLockFor(mMemoryLocation)->unlock();
+}
+
+
+std::mutex* RAIIMutex::retrieveLockFor(const void* location)
+{
+	static std::map<const void*, std::mutex*> oMutexMap;
+	static std::mutex oMapLock;
+
 	oMapLock.lock();
-	std::mutex* lock = &oMutexMap[mMemoryLocation];
+	std::map<const void*, std::mutex*>::iterator found = oMutexMap.find(location);
+	if (found == oMutexMap.end())
+	{
+		oMutexMap.insert({location, new std::mutex()});
+	}
+	std::mutex* lock = oMutexMap[location];
 	oMapLock.unlock();
 
-	lock->unlock();
+	return lock;
 }

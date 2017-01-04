@@ -2,6 +2,8 @@
 
 #include <cstring>
 #include <utility>
+#include <new>
+#include <iostream>
 
 Message::Message(void):
 	mBuffer(NULL),
@@ -12,8 +14,15 @@ Message::Message(void):
 Message::Message(const void* rawBuffer, std::size_t bufferSize)
 {
 	mSize = bufferSize;
-	mBuffer = new char[mSize];
-	memcpy(mBuffer, rawBuffer, mSize);
+	try
+	{
+		mBuffer = new char[mSize];
+		memcpy(mBuffer, rawBuffer, mSize);
+	}
+	catch(std::bad_alloc& ex)
+	{
+		std::cerr << "Unable to allocate memory! " << ex.what() << std::endl;
+	}
 }
 Message::Message(const Message& src):
 	Message(src.mBuffer, src.mSize)
