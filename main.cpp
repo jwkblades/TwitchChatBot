@@ -8,6 +8,35 @@
 #include <thread>
 using namespace std;
 
+#include <vector>
+
+std::vector<std::string> split(std::string str, const std::string& delimiter)
+{
+	std::vector<std::string> parts;
+
+	while (!str.empty())
+	{
+		std::size_t pos = str.find(delimiter);
+		std::string part = str.substr(0, pos);
+		if (pos == std::string::npos)
+		{
+			str = "";
+		}
+		else
+		{
+			str = str.substr(pos + delimiter.size());
+		}
+
+		if (!part.empty())
+		{
+			parts.push_back(part);
+		}
+	}
+
+	return parts;
+}
+
+
 int main(void)
 {
 
@@ -15,6 +44,87 @@ int main(void)
 	Address commandParser("commandParser");
 	PostOffice::instance()->registerAddress(commandParser);
 	Address transceiver("transceiver");
+
+	auto commandParserLambda = [commandParser, transceiver](void) -> void
+	{
+		PostOffice* postOffice = PostOffice::instance();
+		Address myAddress = commandParser;
+
+		std::string command = "";
+		while (command != "SHUTDOWN")
+		{
+			Message incomingMsg;
+			if (PostOffice::isValidInstance(postOffice) && postOffice->checkMail(myAddress))
+			{
+				incomingMsg = postOffice->getMail(myAddress);
+			}
+
+			if (incomingMsg.size() == 0)
+			{
+				usleep(300);
+				continue;
+			}
+
+			cout << myAddress << " received '" << incomingMsg.raw() << "' " << incomingMsg.size() << endl << endl;
+
+			command = std::string(incomingMsg.raw(), incomingMsg.size() - 1);
+
+			std::vector<std::string> parts = split(command, " ");
+			for (const std::string& part : parts)
+			{
+				cout << "Part: '" << part << "'" << endl;
+			}
+
+			if (parts.empty())
+			{
+				continue;
+			}
+
+			if (parts.at(0).empty())
+			{
+				// we have an empty prefix/ command...
+				continue;
+			}
+
+			if(parts.at(0).at(0) == ':')
+			{
+				// We have a prefix, meaning that the second item (if it exists) is the command.
+				parts.erase(parts.begin());
+			}
+			if (parts.empty())
+			{
+				continue;
+			}
+
+			cout << "Command: " << command << endl;
+			command = parts.at(0);
+			if (command == "PING")
+			{
+				std::string pong = "PONG " + parts.at(1) + "\r\n";
+
+				if (PostOffice::isValidInstance(postOffice))
+				{
+					Message msg(pong.c_str(), pong.size() + 1);
+					postOffice->sendMessage(transceiver, msg);
+				}
+
+			}
+			else if (command == "376")
+			{
+				// the end of the MOTD message.
+				std::string cmd = "JOIN #betawar1305\r\n";
+
+				if (PostOffice::isValidInstance(postOffice))
+				{
+					Message msg(cmd.c_str(), cmd.size() + 1);
+					postOffice->sendMessage(transceiver, msg);
+				}
+			}
+
+
+		}
+		cout << "Exiting " << myAddress << endl;
+	};
 
 	auto transceiverLambda = [&twitchConnection, commandParser, transceiver](void) -> void
 	{
@@ -26,6 +136,13 @@ int main(void)
 		if (!postOffice->registerAddress(myAddress))
 		{
 			cout << "Unable to register address " << myAddress << endl;
+			if (PostOffice::isValidInstance(postOffice))
+			{
+				std::string shutdownCommandParser = "SHUTDOWN";
+				Message msg(shutdownCommandParser.c_str(), shutdownCommandParser.size() + 1);
+				postOffice->sendMessage(commandParser, msg);
+			}
+			cout << "Exiting " << myAddress << endl;
 			return;
 		}
 
@@ -76,14 +193,14 @@ int main(void)
 					incompleteMessage = incompleteMessage.substr(0, incompleteMessage.size() - 1);
 					if (PostOffice::isValidInstance(postOffice))
 					{
-						cout << "Sending incoming command '" << incompleteMessage << "' to " << commandParser << endl;
+						cout << "Sending incoming command '" << incompleteMessage << "' " << (incompleteMessage.size() + 1) << " to " << commandParser << endl;
 						Message msg(incompleteMessage.c_str(), incompleteMessage.size() + 1);
 						postOffice->sendMessage(commandParser, msg);
 					}
 					else
 					{
 						cout << "Invalid PostOffice instance." << endl;
-						return;
+						break;
 					}
 
 					incompleteMessage = "";
@@ -94,6 +211,13 @@ int main(void)
 		}
 
 		delete [] buffer;
+		if (PostOffice::isValidInstance(postOffice))
+		{
+			std::string shutdownCommandParser = "SHUTDOWN";
+			Message msg(shutdownCommandParser.c_str(), shutdownCommandParser.size() + 1);
+			postOffice->sendMessage(commandParser, msg);
+		}
+		cout << "Exiting " << myAddress << endl;
 	};
 
 	int connectionRet = twitchConnection.connect("irc.chat.twitch.tv", "6667");
@@ -119,6 +243,7 @@ int main(void)
 
 	std::list<std::thread> threads;
 	threads.push_back(std::thread(transceiverLambda));
+	threads.push_back(std::thread(commandParserLambda));
 
 	for (std::thread& t : threads)
 	{

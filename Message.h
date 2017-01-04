@@ -14,6 +14,8 @@ public:
 	std::size_t size(void) const;
 	const char* raw(void) const;
 	template<typename T> T get(void) const;
+
+	Message& operator=(const Message& src);
 private:
 	char* mBuffer;
 	std::size_t mSize;

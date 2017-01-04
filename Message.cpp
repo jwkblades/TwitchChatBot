@@ -30,6 +30,29 @@ Message::Message(const Message& src):
 	// empty
 }
 
+Message& Message::operator=(const Message& src)
+{
+	if (this == &src)
+	{
+		return *this;
+	}
+
+	mSize = src.mSize;
+	try
+	{
+		mBuffer = new char[mSize];
+		memcpy(mBuffer, src.mBuffer, mSize);
+	}
+	catch(std::bad_alloc& ex)
+	{
+		std::cerr << "Unable to allocate memory! " << ex.what() << std::endl;
+	}
+
+
+	return *this;
+}
+
+
 Message::~Message(void)
 {
 	delete [] mBuffer;
