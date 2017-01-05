@@ -6,7 +6,7 @@ EXE=TwitchChatBot
 .cpp.o:
 	${CC} ${FLAGS} -o $@ -c $^
 
-${EXE}: main.o Socket.o RAIIMutex.o PostOffice.o Address.o Message.o
+${EXE}: main.o Socket.o RAIIMutex.o PostOffice.o Address.o Message.o Throttler.o ScopeExit.o utils.o
 	${CC} ${FLAGS} -o $@ $^
 
 .Phony: clean
