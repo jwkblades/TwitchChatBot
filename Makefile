@@ -9,7 +9,7 @@ OBJS := $(OBJS:.ipp=.o)
 OBJS := $(patsubst ./%,%,${OBJS})
 OBJS := $(patsubst %,${DEPDIR}/%,${OBJS})
 $(shell mkdir -p ${DEPDIR} >/dev/null)
-DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
+DEPFLAGS = -MT $@ -MMD -MP -MF ${DEPDIR}/$*.d
 COMPILE.cc = ${CC} ${DEPFLAGS} ${FLAGS} -c
 
 ${DEPDIR}/%.o : %.cpp
