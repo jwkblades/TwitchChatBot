@@ -4,6 +4,8 @@
 #include "ScopeExit.h"
 #include "utils.h"
 
+#include "json/src/json.hpp"
+
 #include <sstream>
 #include <iostream>
 #include <string>
@@ -18,18 +20,77 @@ int main(void)
 	Socket twitchConnection;
 	Address commandParser("commandParser");
 	Address transceiver("transceiver");
+	Address pointAdder("pointAdder");
 
-	auto commandParserLambda = [commandParser, transceiver](void) -> void
+	std::list<std::string> members = {};
+
+	auto pointAdderLambda = [pointAdder, &members](void) -> void
+	{
+		Throttler pointIncrementer(std::chrono::seconds(60));
+
+		nlohmann::json points = nlohmann::json::object();
+
+		std::ifstream jsonIn("members.json");
+		if (jsonIn.good())
+		{
+			jsonIn >> points;
+		}
+		jsonIn.close();
+
+		while (!PostOffice::instance()->checkMail(pointAdder))
+		{
+			if (pointIncrementer.check(1))
+			{
+				{
+					RAIIMutex memberLock(&members);
+					for (const std::string& member : members)
+					{
+						int value = 0;
+						if (!points[member].is_null())
+						{
+							value = points[member].get<int>();
+						}
+						points[member] = ++value;
+					}
+				}
+				pointIncrementer.addUnit();
+
+				std::ofstream jsonIn("members.json");
+				if (jsonIn.good())
+				{
+					jsonIn << points;
+				}
+				jsonIn.close();
+
+			}
+			else
+			{
+				usleep(100000);
+			}
+		};
+	};
+	auto commandParserLambda = [commandParser, transceiver, &members](void) -> void
 	{
 		PostOffice* postOffice = PostOffice::instance();
 		Address myAddress = commandParser;
 		SCOPE_EXIT [&](){ cout << "Exiting " << myAddress << endl; };
+
+		Throttler namesTimeout(std::chrono::seconds(60));
+		bool previousMemberUpdateFinished = false;
 
 		std::string command = "";
 		std::string prefix = "";
 		std::vector<std::string> params;
 		while (command != "SHUTDOWN")
 		{
+			if (namesTimeout.check(1))
+			{
+				//sendMessage(transceiver, "NAMES #betawar1305\r\n");
+				sendMessage(transceiver, "PART #betawar1305\r\n");
+				sendMessage(transceiver, "JOIN #betawar1305\r\n");
+				namesTimeout.addUnit();
+			}
+
 			Message incomingMsg;
 			if (PostOffice::isValidInstance(postOffice) && postOffice->checkMail(myAddress))
 			{
@@ -85,16 +146,63 @@ int main(void)
 			cout << "Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(params, "', '") << "']" << endl;
 			if (command == "PING")
 			{
-				sentMessage(transceiver, "PONG " + join(params, " ") + "\r\n");
+				sendMessage(transceiver, "PONG " + join(params, " ") + "\r\n");
+			}
+			else if (command == "PRIVMSG")
+			{
+				if (params.back() == "!points")
+				{
+					nlohmann::json points = nlohmann::json::object();
+					std::ifstream jsonIn("members.json");
+					if (jsonIn.good())
+					{
+						jsonIn >> points;
+					}
+					jsonIn.close();
+
+					std::string channel = params.front();
+					std::string user = split(prefix.substr(1), "!").at(0);
+
+					cout << "Retrieving points for '" << user << "' on " << channel << endl;
+					if (points[user].is_null())
+					{
+						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
+					}
+					else
+					{
+						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", your point total is " + points[user].dump() + ".\r\n");
+					}
+				}
 			}
 			else if (command == "376") // the end of the MOTD message.
 			{
-				sentMessage(transceiver, "JOIN #betawar1305\r\n");
+				sendMessage(transceiver, "JOIN #betawar1305\r\n");
+			}
+			else if (command == "353") // members list
+			{
+				RAIIMutex memberLock(&members);
+				if (previousMemberUpdateFinished)
+				{
+					members.clear();
+					previousMemberUpdateFinished = false;
+				}
+				std::vector<std::string> names = split(params.back(), " ");
+				members.insert(members.begin(), names.begin(), names.end());
+			}
+			else if (command == "366") // member list finished
+			{
+				RAIIMutex memberLock(&members);
+				previousMemberUpdateFinished = true;
+				for (const std::string& member : members)
+				{
+					cout << "=== Member: " << member << endl;
+				}
+
 			}
 		}
 	};
 
-	auto transceiverLambda = [&twitchConnection, commandParser, transceiver](void) -> void
+	auto transceiverLambda = [&twitchConnection, commandParser, transceiver, pointAdder](void) -> void
 	{
 		const int bufferLength = 1024;
 		char* buffer = new char[bufferLength];
@@ -105,7 +213,8 @@ int main(void)
 		SCOPE_EXIT [&](void) -> void
 		{
 			delete [] buffer;
-			sentMessage(commandParser, "SHUTDOWN");
+			sendMessage(commandParser, "SHUTDOWN");
+			sendMessage(pointAdder, "SHUTDOWN");
 			cout << "Exiting " << myAddress << endl;
 		};
 
@@ -154,7 +263,7 @@ int main(void)
 				if (!incompleteMessage.empty() && incompleteMessage.back() == '\r')
 				{
 					incompleteMessage = incompleteMessage.substr(0, incompleteMessage.size() - 1);
-					sentMessage(commandParser, incompleteMessage);
+					sendMessage(commandParser, incompleteMessage);
 					incompleteMessage = "";
 				}
 			} while (!s.eof());
@@ -174,12 +283,14 @@ int main(void)
 	fileIn >> oauthToken;
 	fileIn.close();
 
-	sentMessage(transceiver, "PASS " + oauthToken + "\r\n");
-	sentMessage(transceiver, "NICK betawar1305\r\n");
+	sendMessage(transceiver, "PASS " + oauthToken + "\r\n");
+	sendMessage(transceiver, "NICK betawar1305\r\n");
+	//sendMessage(transceiver, "CAP REQ :twitch.tv/membership\r\n");
 
 	std::list<std::thread> threads;
 	threads.push_back(std::thread(transceiverLambda));
 	threads.push_back(std::thread(commandParserLambda));
+	threads.push_back(std::thread(pointAdderLambda));
 
 	for (std::thread& t : threads)
 	{

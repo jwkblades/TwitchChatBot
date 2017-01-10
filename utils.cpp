@@ -42,7 +42,7 @@ std::string join(const std::vector<std::string>& parts, const std::string& delim
 	return ret;
 }
 
-void sentMessage(const Address& addr, const std::string& str)
+void sendMessage(const Address& addr, const std::string& str)
 {
 	PostOffice* postOffice = PostOffice::instance();
 

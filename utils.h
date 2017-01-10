@@ -10,6 +10,6 @@ std::vector<std::string> split(std::string str, const std::string& delimiter);
 
 std::string join(const std::vector<std::string>& parts, const std::string& delimiter);
 
-void sentMessage(const Address& addr, const std::string& str);
+void sendMessage(const Address& addr, const std::string& str);
 
 #endif

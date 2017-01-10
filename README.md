@@ -8,6 +8,13 @@ in this stream series.
 Some portions of the class have been left purposely incomplete for users to
 fill in if they so choose.
 
+
+Requirements
+============
+
+We use ag ([the\_silver\_searcher](https://github.com/ggreer/the_silver_searcher)) to find source files while ignoring sub
+directories.
+
 Twitch?
 =======
 

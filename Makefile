@@ -3,7 +3,7 @@ CC:=g++
 EXE=$(shell basename ${CURDIR})
 
 DEPDIR := deps
-SRCS := $(shell find . -name '*.[ci]pp')
+SRCS := $(shell ag -g '\.[ci]pp' --ignore-dir json/ --nocolor)
 OBJS := $(SRCS:.cpp=.o)
 OBJS := $(OBJS:.ipp=.o)
 OBJS := $(patsubst ./%,%,${OBJS})
