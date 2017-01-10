@@ -24,3 +24,5 @@ License
 =======
 
 GPLv2
+
+Need a different license? Get in contact with us and we can work something out.
