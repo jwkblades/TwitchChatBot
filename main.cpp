@@ -17,9 +17,7 @@ int main(void)
 
 	Socket twitchConnection;
 	Address commandParser("commandParser");
-	PostOffice::instance()->registerAddress(commandParser);
 	Address transceiver("transceiver");
-	PostOffice::instance()->registerAddress(transceiver);
 
 	auto commandParserLambda = [commandParser, transceiver](void) -> void
 	{

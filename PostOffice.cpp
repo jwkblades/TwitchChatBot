@@ -34,7 +34,7 @@ void PostOffice::finalize(void)
 	oInstance = NULL;
 }
 
-bool PostOffice::registerAddress(const Address& address)
+bool PostOffice::registerAddressIfNeeded(const Address& address) const
 {
 	RAIIMutex MailboxLock(&mMailboxes);
 	return mMailboxes.insert(std::pair<Address, std::list<Message>>(address, {})).second;
@@ -42,6 +42,11 @@ bool PostOffice::registerAddress(const Address& address)
 
 bool PostOffice::checkMail(const Address& self) const
 {
+	if (registerAddressIfNeeded(self))
+	{
+		return false;
+	}
+
 	std::map<Address, std::list<Message>>::const_iterator messages;
 	{
 		RAIIMutex MailboxLock(&mMailboxes);
@@ -50,7 +55,7 @@ bool PostOffice::checkMail(const Address& self) const
 	RAIIMutex MessagesLock(&messages->second);
 	return !messages->second.empty();
 }
-bool PostOffice::isValidAddress(const Address& other) const
+bool PostOffice::doesAddressExist(const Address& other) const
 {
 	RAIIMutex MailboxLock(&mMailboxes);
 	return mMailboxes.find(other) != mMailboxes.end();
@@ -58,6 +63,7 @@ bool PostOffice::isValidAddress(const Address& other) const
 
 void PostOffice::sendMessage(const Address& to, Message& message)
 {
+	registerAddressIfNeeded(to);
 	std::map<Address, std::list<Message>>::iterator messages;
 	{
 		RAIIMutex MailboxLock(&mMailboxes);
@@ -69,6 +75,7 @@ void PostOffice::sendMessage(const Address& to, Message& message)
 
 Message PostOffice::getMail(const Address& self)
 {
+	registerAddressIfNeeded(self);
 	std::map<Address, std::list<Message>>::iterator messages;
 	{
 		RAIIMutex MailboxLock(&mMailboxes);

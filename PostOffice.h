@@ -16,10 +16,8 @@ public:
 
 	static void finalize(void);
 
-	bool registerAddress(const Address& address);
-
 	bool checkMail(const Address& self) const;
-	bool isValidAddress(const Address& other) const;
+	bool doesAddressExist(const Address& other) const;
 
 	void sendMessage(const Address& to, Message& message);
 	Message getMail(const Address& self);
@@ -28,7 +26,9 @@ private:
 	PostOffice(void);
 	~PostOffice(void);
 
-	std::map<Address, std::list<Message>> mMailboxes;
+	bool registerAddressIfNeeded(const Address& address) const;
+
+	mutable std::map<Address, std::list<Message>> mMailboxes;
 
 	static PostOffice* oInstance;
 };
