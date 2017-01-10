@@ -1,3 +1,4 @@
 TwitchChatBot
 *.o
 *.*.sw*
+deps/
