@@ -12,6 +12,7 @@
 #include <fstream>
 #include <thread>
 #include <vector>
+#include <set>
 using namespace std;
 
 int main(void)
@@ -22,12 +23,14 @@ int main(void)
 	Address transceiver("transceiver");
 	Address pointAdder("pointAdder");
 
-	std::list<std::string> members = {};
 
-	auto pointAdderLambda = [pointAdder, &members](void) -> void
+	auto pointAdderLambda = [pointAdder, commandParser](void) -> void
 	{
-		Throttler pointIncrementer(std::chrono::seconds(60));
+		Throttler pointIncrementer(std::chrono::seconds(20));
+		PostOffice* postOffice = PostOffice::instance();
+		Address myAddress = pointAdder;
 
+		std::set<std::string> members = {};
 		nlohmann::json points = nlohmann::json::object();
 
 		std::ifstream jsonIn("members.json");
@@ -37,7 +40,8 @@ int main(void)
 		}
 		jsonIn.close();
 
-		while (!PostOffice::instance()->checkMail(pointAdder))
+		std::string command = "";
+		while (command != "SHUTDOWN")
 		{
 			if (pointIncrementer.check(1))
 			{
@@ -46,11 +50,15 @@ int main(void)
 					for (const std::string& member : members)
 					{
 						int value = 0;
-						if (!points[member].is_null())
+						if (points[member].is_null())
 						{
-							value = points[member].get<int>();
+							points[member] = nlohmann::json::object();
 						}
-						points[member] = ++value;
+						if (!points[member]["points"].is_null())
+						{
+							value = points[member]["points"].get<int>();
+						}
+						points[member]["points"] = ++value;
 					}
 				}
 				pointIncrementer.addUnit();
@@ -61,36 +69,85 @@ int main(void)
 					jsonIn << points;
 				}
 				jsonIn.close();
-
 			}
-			else
+
+			Message incomingMsg;
+			if (PostOffice::isValidInstance(postOffice) && postOffice->checkMail(myAddress))
 			{
-				usleep(100000);
+				incomingMsg = postOffice->getMail(myAddress);
+			}
+			if (incomingMsg.size() == 0)
+			{
+				usleep(300);
+				continue;
+			}
+
+			command = std::string(incomingMsg.raw(), incomingMsg.size() - 1);
+			std::vector<std::string> parts = split(command, " ");
+			if (parts.empty())
+			{
+				usleep(300);
+				continue;
+			}
+			command = parts.at(0);
+			parts.erase(parts.begin());
+
+			if (command == "JOIN" && !parts.empty())
+			{
+				members.insert(parts.at(0));
+				if (points[parts.at(0)].is_null())
+				{
+					points[parts.at(0)] = nlohmann::json::object();
+				}
+				points[parts.at(0)]["role"] = "member";
+			}
+			else if (command == "PART" && !parts.empty())
+			{
+				members.erase(members.find(parts.at(0)));
+			}
+			else if (command == "MODE" && parts.size() >= 2)
+			{
+				if (points[parts.at(1)].is_null())
+				{
+					points[parts.at(1)] = nlohmann::json::object();
+				}
+				points[parts.at(1)]["role"] = parts.at(0);
+			}
+			else if (command == "GETROLE" && !parts.empty())
+			{
+				if (points[parts.at(0)].is_null())
+				{
+					points[parts.at(0)] = nlohmann::json::object();
+				}
+
+				std::string role = "member";
+				if (points[parts.at(0)]["role"].is_string())
+				{
+					role = points[parts.at(0)]["role"].get<std::string>();
+				}
+				parts.insert(parts.begin(), role);
+				sendMessage(commandParser, "RETURNROLE " + join(parts, " "));
 			}
 		};
 	};
-	auto commandParserLambda = [commandParser, transceiver, &members](void) -> void
+	auto commandParserLambda = [commandParser, pointAdder, transceiver](void) -> void
 	{
 		PostOffice* postOffice = PostOffice::instance();
 		Address myAddress = commandParser;
 		SCOPE_EXIT [&](){ cout << "Exiting " << myAddress << endl; };
 
 		Throttler namesTimeout(std::chrono::seconds(60));
-		bool previousMemberUpdateFinished = false;
 
 		std::string command = "";
 		std::string prefix = "";
 		std::vector<std::string> params;
+
+
+		std::list<std::string> membersInRaffle;
+		bool raffleOpen = false;
+
 		while (command != "SHUTDOWN")
 		{
-			if (namesTimeout.check(1))
-			{
-				//sendMessage(transceiver, "NAMES #betawar1305\r\n");
-				sendMessage(transceiver, "PART #betawar1305\r\n");
-				sendMessage(transceiver, "JOIN #betawar1305\r\n");
-				namesTimeout.addUnit();
-			}
-
 			Message incomingMsg;
 			if (PostOffice::isValidInstance(postOffice) && postOffice->checkMail(myAddress))
 			{
@@ -125,6 +182,7 @@ int main(void)
 				continue;
 			}
 
+			std::string role = "";
 			command = parts.at(0);
 			parts.erase(parts.begin());
 
@@ -143,6 +201,24 @@ int main(void)
 				}
 			}
 
+			/*
+			 * FIXME Need to come up with a better asynchronous messaging protocol
+			 *       (though it will probably still run over the PostOffice).
+			 */
+			if (command == "RETURNROLE")
+			{
+				role = params.front();
+				params.erase(params.begin());
+
+				std::string user = params.front();
+				params.erase(params.begin());
+				
+				prefix = ":" + user + "!" + user + "@" + user + ".tmi.twitch.tv";
+
+				command = params.front();
+				params.erase(params.begin());
+			}
+
 			cout << "Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(params, "', '") << "']" << endl;
 			if (command == "PING")
 			{
@@ -150,6 +226,7 @@ int main(void)
 			}
 			else if (command == "PRIVMSG")
 			{
+				std::string channel = params.front();
 				if (params.back() == "!points")
 				{
 					nlohmann::json points = nlohmann::json::object();
@@ -160,44 +237,76 @@ int main(void)
 					}
 					jsonIn.close();
 
-					std::string channel = params.front();
 					std::string user = split(prefix.substr(1), "!").at(0);
 
 					cout << "Retrieving points for '" << user << "' on " << channel << endl;
-					if (points[user].is_null())
+					if (points[user]["points"].is_null())
 					{
 						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
 					}
 					else
 					{
-						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", your point total is " + points[user].dump() + ".\r\n");
+						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", your point total is " + points[user]["points"].dump() + ".\r\n");
 					}
 				}
+				else if (params.back() == "!raffleStart")
+				{
+					std::string user = split(prefix.substr(1), "!").at(0);
+					if (role == "+o")
+					{
+						raffleOpen = true;
+						sendMessage(transceiver, "PRIVMSG " + channel + " :The raffle is now open! Send '!joinRaffle' (no quotes) to join.\r\n");
+					}
+					else if (role != "")
+					{
+						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", you don't have permissions to execute that command.\r\n");
+					}
+					else
+					{
+						sendMessage(pointAdder, "GETROLE " + user + " PRIVMSG " + join(params, " "));
+					}
+				}
+				else if (params.back() == "!raffleJoin")
+				{
+					/*
+					 * NOTE This isn't done per-say. It has a drastic flaw in that it doesn't
+					 *      actually cost points to join the raffle. We will want to change
+					 *      that. But given that I don't really like the way the asynchronous
+					 *      messaging is working out with the GETROLE side of things, I am
+					 *      going to take some time to architect this and come back with a
+					 *      better option.
+					 */
+					std::string user = split(prefix.substr(1), "!").at(0);
+					membersInRaffle.push_back(user);
+					sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", you are now in the raffle.\r\n");
+				}
+
+			}
+			else if (command == "JOIN" || command == "PART")
+			{
+				std::string user = split(prefix.substr(1), "!").at(0);
+				sendMessage(pointAdder, command + " " + user);
+			}
+			else if (command == "MODE" && params.size() >= 3)
+			{
+				sendMessage(pointAdder, "MODE " + params.at(1) + " " + params.at(2));
 			}
 			else if (command == "376") // the end of the MOTD message.
 			{
+				sendMessage(transceiver, "CAP REQ twitch.tv/membership\r\n");
 				sendMessage(transceiver, "JOIN #betawar1305\r\n");
 			}
 			else if (command == "353") // members list
 			{
-				RAIIMutex memberLock(&members);
-				if (previousMemberUpdateFinished)
-				{
-					members.clear();
-					previousMemberUpdateFinished = false;
-				}
 				std::vector<std::string> names = split(params.back(), " ");
-				members.insert(members.begin(), names.begin(), names.end());
+				for (const std::string& name : names)
+				{
+					sendMessage(pointAdder, "JOIN " + name);
+				}
 			}
 			else if (command == "366") // member list finished
 			{
-				RAIIMutex memberLock(&members);
-				previousMemberUpdateFinished = true;
-				for (const std::string& member : members)
-				{
-					cout << "=== Member: " << member << endl;
-				}
-
+				// empty
 			}
 		}
 	};
@@ -285,7 +394,6 @@ int main(void)
 
 	sendMessage(transceiver, "PASS " + oauthToken + "\r\n");
 	sendMessage(transceiver, "NICK betawar1305\r\n");
-	//sendMessage(transceiver, "CAP REQ :twitch.tv/membership\r\n");
 
 	std::list<std::thread> threads;
 	threads.push_back(std::thread(transceiverLambda));
