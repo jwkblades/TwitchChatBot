@@ -42,10 +42,51 @@ std::string join(const std::vector<std::string>& parts, const std::string& delim
 	return ret;
 }
 
-void sendMessage(const Address& addr, const std::string& str)
+CommandParts parseCommand(const Message& incoming)
 {
-	PostOffice* postOffice = PostOffice::instance();
+	std::string command = std::string(incoming.raw(), incoming.size() - 1);
+	std::string prefix = "";
+	std::vector<std::string> params;
 
-	Message msg(str.c_str(), str.size() + 1);
-	postOffice->sendMessage(addr, msg);
+	std::vector<std::string> parts = split(command, " ");
+	if (parts.empty() || parts.at(0).empty()) // we have an empty prefix/ command...
+	{
+		return {false, {}, {}, {}};
+	}
+
+	if(parts.at(0).at(0) == ':')
+	{
+		// We have a prefix, meaning that the second item (if it exists) is the command.
+		prefix = parts.at(0);
+		parts.erase(parts.begin());
+	}
+
+	if (parts.empty())
+	{
+		return {false, {}, {}, {}};
+	}
+
+	command = parts.at(0);
+	parts.erase(parts.begin());
+
+	while (!parts.empty())
+	{
+		if (parts.at(0).size() > 0 && parts.at(0).at(0) == ':')
+		{
+			parts.at(0) = parts.at(0).substr(1);
+			params.push_back(join(parts, " "));
+			parts.clear();
+		}
+		else
+		{
+			params.push_back(parts.at(0));
+			parts.erase(parts.begin());
+		}
+	}
+	return {
+		true,
+		command,
+		prefix,
+		params
+	};
 }

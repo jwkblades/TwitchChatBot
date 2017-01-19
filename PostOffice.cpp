@@ -61,16 +61,23 @@ bool PostOffice::doesAddressExist(const Address& other) const
 	return mMailboxes.find(other) != mMailboxes.end();
 }
 
-void PostOffice::sendMessage(const Address& to, Message& message)
+void PostOffice::sendMessage(Message& message, bool OOB)
 {
-	registerAddressIfNeeded(to);
+	registerAddressIfNeeded(message.to());
 	std::map<Address, std::list<Message>>::iterator messages;
 	{
 		RAIIMutex MailboxLock(&mMailboxes);
-		messages = mMailboxes.find(to);
+		messages = mMailboxes.find(message.to());
 	}
 	RAIIMutex MessagesLock(&messages->second);
-	messages->second.push_back(message);
+	if (OOB)
+	{
+		messages->second.push_front(message);
+	}
+	else
+	{
+		messages->second.push_back(message);
+	}
 }
 
 Message PostOffice::getMail(const Address& self)

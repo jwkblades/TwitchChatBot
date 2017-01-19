@@ -23,7 +23,6 @@ int main(void)
 	Address transceiver("transceiver");
 	Address pointAdder("pointAdder");
 
-
 	auto pointAdderLambda = [pointAdder, commandParser](void) -> void
 	{
 		Throttler pointIncrementer(std::chrono::seconds(20));
@@ -113,6 +112,17 @@ int main(void)
 				}
 				points[parts.at(1)]["role"] = parts.at(0);
 			}
+			else if (command == "GET_POINTS" && !parts.empty())
+			{
+				std::string user = parts.at(0);
+				std::string resp = "0";
+				if (!points[user].is_null())
+				{
+					resp = points[user]["points"].dump();
+					Message response(resp);
+					incomingMsg.respond(response);
+				}
+			}
 			else if (command == "GETROLE" && !parts.empty())
 			{
 				if (points[parts.at(0)].is_null())
@@ -126,7 +136,29 @@ int main(void)
 					role = points[parts.at(0)]["role"].get<std::string>();
 				}
 				parts.insert(parts.begin(), role);
-				sendMessage(commandParser, "RETURNROLE " + join(parts, " "));
+				Message msg("RETURNROLE " + join(parts, " "));
+				incomingMsg.respond(msg);
+			}
+			else if (command == "DEDUCT_POINTS" && !parts.empty())
+			{
+				std::string resp = "DEDUCT_FAIL";
+				if (points[parts.at(0)].is_null())
+				{
+					points[parts.at(0)] = nlohmann::json::object();
+				}
+				else
+				{
+					int value = points[parts.at(0)]["points"].get<int>();
+					if (value >= 5)
+					{
+						value -= 5;
+						points[parts.at(0)]["points"] = value;
+						resp = "DEDUCT_SUCCESS";
+					}
+				}
+
+				Message msg(resp);
+				incomingMsg.respond(msg);
 			}
 		};
 	};
@@ -141,7 +173,6 @@ int main(void)
 		std::string command = "";
 		std::string prefix = "";
 		std::vector<std::string> params;
-
 
 		std::list<std::string> membersInRaffle;
 		bool raffleOpen = false;
@@ -159,70 +190,21 @@ int main(void)
 				usleep(300);
 				continue;
 			}
-
-			command = std::string(incomingMsg.raw(), incomingMsg.size() - 1);
-			prefix = "";
-			params.clear();
-
-			std::vector<std::string> parts = split(command, " ");
-			if (parts.empty() || parts.at(0).empty()) // we have an empty prefix/ command...
-			{
-				continue;
-			}
-
-			if(parts.at(0).at(0) == ':')
-			{
-				// We have a prefix, meaning that the second item (if it exists) is the command.
-				prefix = parts.at(0);
-				parts.erase(parts.begin());
-			}
-
-			if (parts.empty())
-			{
-				continue;
-			}
-
 			std::string role = "";
-			command = parts.at(0);
-			parts.erase(parts.begin());
-
-			while (!parts.empty())
+			CommandParts cmdParts = parseCommand(incomingMsg);
+			if (!cmdParts.valid)
 			{
-				if (parts.at(0).size() > 0 && parts.at(0).at(0) == ':')
-				{
-					parts.at(0) = parts.at(0).substr(1);
-					params.push_back(join(parts, " "));
-					parts.clear();
-				}
-				else
-				{
-					params.push_back(parts.at(0));
-					parts.erase(parts.begin());
-				}
+				continue;
 			}
-
-			/*
-			 * FIXME Need to come up with a better asynchronous messaging protocol
-			 *       (though it will probably still run over the PostOffice).
-			 */
-			if (command == "RETURNROLE")
-			{
-				role = params.front();
-				params.erase(params.begin());
-
-				std::string user = params.front();
-				params.erase(params.begin());
-				
-				prefix = ":" + user + "!" + user + "@" + user + ".tmi.twitch.tv";
-
-				command = params.front();
-				params.erase(params.begin());
-			}
+			command = cmdParts.command;
+			prefix = cmdParts.prefix;
+			params = cmdParts.params;
 
 			cout << "Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(params, "', '") << "']" << endl;
 			if (command == "PING")
 			{
-				sendMessage(transceiver, "PONG " + join(params, " ") + "\r\n");
+				Message msg("PONG " + join(params, " ") + "\r\n");
+				msg.send(myAddress, transceiver);
 			}
 			else if (command == "PRIVMSG")
 			{
@@ -238,35 +220,60 @@ int main(void)
 					jsonIn.close();
 
 					std::string user = split(prefix.substr(1), "!").at(0);
+					Message pointInfo("GET_POINTS " + user);
+					Message response = pointInfo.sendAndAwaitResponse(myAddress, pointAdder);
+					if (response.size() == 0)
+					{
+						Message msg("PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
+						msg.send(myAddress, transceiver);
+					}
+					std::string pointValue(response.raw(), response.size());
 
 					cout << "Retrieving points for '" << user << "' on " << channel << endl;
-					if (points[user]["points"].is_null())
+					if (pointValue == "0")
 					{
-						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
+						Message msg("PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
+						msg.send(myAddress, transceiver);
 					}
 					else
 					{
-						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", your point total is " + points[user]["points"].dump() + ".\r\n");
+						Message msg("PRIVMSG " + channel + " :@" + user + ", your point total is " + pointValue + ".\r\n");
+						msg.send(myAddress, transceiver);
 					}
 				}
 				else if (params.back() == "!raffleStart")
 				{
 					std::string user = split(prefix.substr(1), "!").at(0);
+					Message msg("GETROLE " + user + " PRIVMSG " + join(params, " "));
+					Message response = msg.sendAndAwaitResponse(myAddress, pointAdder);
+					if (response.size() == 0)
+					{
+						continue;
+					}
+					CommandParts cmdParts = parseCommand(response);
+					if (!cmdParts.valid)
+					{
+						continue;
+					}
+					command = cmdParts.command;
+					prefix = cmdParts.prefix;
+					params = cmdParts.params;
+					role = params.at(0);
+					cout << "=== Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(params, "', '") << "'], Role='" << role << "'" << endl;
+
 					if (role == "+o")
 					{
 						raffleOpen = true;
-						sendMessage(transceiver, "PRIVMSG " + channel + " :The raffle is now open! Send '!joinRaffle' (no quotes) to join.\r\n");
-					}
-					else if (role != "")
-					{
-						sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", you don't have permissions to execute that command.\r\n");
+						Message msg("PRIVMSG " + channel + " :The raffle is now open! Send '!joinRaffle' (no quotes) to join.\r\n");
+						msg.send(myAddress, transceiver);
 					}
 					else
 					{
-						sendMessage(pointAdder, "GETROLE " + user + " PRIVMSG " + join(params, " "));
+						Message msg("PRIVMSG " + channel + " :@" + user + ", you don't have permissions to execute that command.\r\n");
+						msg.send(myAddress, transceiver);
 					}
 				}
-				else if (params.back() == "!raffleJoin")
+				else if (params.back() == "!joinRaffle")
 				{
 					/*
 					 * NOTE This isn't done per-say. It has a drastic flaw in that it doesn't
@@ -277,31 +284,58 @@ int main(void)
 					 *      better option.
 					 */
 					std::string user = split(prefix.substr(1), "!").at(0);
-					membersInRaffle.push_back(user);
-					sendMessage(transceiver, "PRIVMSG " + channel + " :@" + user + ", you are now in the raffle.\r\n");
+					Message msg("DEDUCT_POINTS " + user);
+					Message response = msg.sendAndAwaitResponse(myAddress, pointAdder);
+					if (response.size() == 0)
+					{
+						continue;
+					}
+					CommandParts cmdParts = parseCommand(response);
+					if (!cmdParts.valid)
+					{
+						continue;
+					}
+					command = cmdParts.command;
+					prefix = cmdParts.prefix;
+					params = cmdParts.params;
+					if (command == "DEDUCT_SUCCESS")
+					{
+						membersInRaffle.push_back(user);
+						Message msg("PRIVMSG " + channel + " :@" + user + ", you are now in the raffle.\r\n");
+						msg.send(myAddress, transceiver);
+					}
+					else
+					{
+						Message msg("PRIVMSG " + channel + " :@" + user + ", Sorry, but the command timed out... Please try again.\r\n");
+						msg.send(myAddress, transceiver);
+					}
 				}
-
 			}
 			else if (command == "JOIN" || command == "PART")
 			{
 				std::string user = split(prefix.substr(1), "!").at(0);
-				sendMessage(pointAdder, command + " " + user);
+				Message msg(command + " " + user);
+				msg.send(myAddress, pointAdder);
 			}
 			else if (command == "MODE" && params.size() >= 3)
 			{
-				sendMessage(pointAdder, "MODE " + params.at(1) + " " + params.at(2));
+				Message msg("MODE " + params.at(1) + " " + params.at(2));
+				msg.send(myAddress, pointAdder);
 			}
 			else if (command == "376") // the end of the MOTD message.
 			{
-				sendMessage(transceiver, "CAP REQ twitch.tv/membership\r\n");
-				sendMessage(transceiver, "JOIN #betawar1305\r\n");
+				Message msg("CAP REQ twitch.tv/membership\r\n");
+				msg.send(myAddress, transceiver);
+				msg = Message("JOIN #betawar1305\r\n");
+				msg.send(myAddress, transceiver);
 			}
 			else if (command == "353") // members list
 			{
 				std::vector<std::string> names = split(params.back(), " ");
 				for (const std::string& name : names)
 				{
-					sendMessage(pointAdder, "JOIN " + name);
+					Message msg("JOIN " + name);
+					msg.send(myAddress, pointAdder);
 				}
 			}
 			else if (command == "366") // member list finished
@@ -322,15 +356,15 @@ int main(void)
 		SCOPE_EXIT [&](void) -> void
 		{
 			delete [] buffer;
-			sendMessage(commandParser, "SHUTDOWN");
-			sendMessage(pointAdder, "SHUTDOWN");
+			Message msg("SHUTDOWN");
+			msg.send(myAddress, commandParser);
+			msg.send(myAddress, pointAdder);
 			cout << "Exiting " << myAddress << endl;
 		};
 
 		std::string incompleteMessage = "";
 		while (twitchConnection.connected())
 		{
-
 			if (PostOffice::isValidInstance(postOffice) && postOffice->checkMail(myAddress) && throttle.check(20))
 			{
 				Message receivedMessage = postOffice->getMail(myAddress);
@@ -338,6 +372,11 @@ int main(void)
 				std::size_t size = receivedMessage.size();
 				std::size_t sentBytes = 0;
 				const char* ptr = receivedMessage.raw();
+				std::string s(ptr, size);
+				//if (s.find("PASS") == std::string::npos)
+				//{
+				//	cout << "Sending message: '" << ptr << "' to twitch." << endl;
+				//}
 
 				do
 				{
@@ -372,7 +411,8 @@ int main(void)
 				if (!incompleteMessage.empty() && incompleteMessage.back() == '\r')
 				{
 					incompleteMessage = incompleteMessage.substr(0, incompleteMessage.size() - 1);
-					sendMessage(commandParser, incompleteMessage);
+					Message msg(incompleteMessage);
+					msg.send(myAddress, commandParser);
 					incompleteMessage = "";
 				}
 			} while (!s.eof());
@@ -392,8 +432,10 @@ int main(void)
 	fileIn >> oauthToken;
 	fileIn.close();
 
-	sendMessage(transceiver, "PASS " + oauthToken + "\r\n");
-	sendMessage(transceiver, "NICK betawar1305\r\n");
+	Message pass("PASS " + oauthToken + "\r\n");
+	pass.send(transceiver, transceiver);
+	Message nick("NICK betawar1305\r\n");
+	nick.send(transceiver, transceiver);
 
 	std::list<std::thread> threads;
 	threads.push_back(std::thread(transceiverLambda));

@@ -20,6 +20,11 @@ bool Address::operator<(const Address& other) const
 	return mAddress < other.mAddress;
 }
 
+Address& Address::operator=(const std::string& src)
+{
+	mAddress = src;
+	return *this;
+}
 Address& Address::operator=(const Address& src)
 {
 	if (this == &src)

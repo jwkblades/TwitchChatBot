@@ -19,7 +19,7 @@ public:
 	bool checkMail(const Address& self) const;
 	bool doesAddressExist(const Address& other) const;
 
-	void sendMessage(const Address& to, Message& message);
+	void sendMessage(Message& message, bool OOB = false);
 	Message getMail(const Address& self);
 
 private:
