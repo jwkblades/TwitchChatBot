@@ -22,6 +22,7 @@ int main(void)
 	Address commandParser("commandParser");
 	Address transceiver("transceiver");
 	Address pointAdder("pointAdder");
+	Address apiAddress("apiServer");
 
 	auto pointAdderLambda = [pointAdder, commandParser](void) -> void
 	{
@@ -345,7 +346,7 @@ int main(void)
 		}
 	};
 
-	auto transceiverLambda = [&twitchConnection, commandParser, transceiver, pointAdder](void) -> void
+	auto transceiverLambda = [&twitchConnection, commandParser, transceiver, pointAdder, apiAddress](void) -> void
 	{
 		const int bufferLength = 1024;
 		char* buffer = new char[bufferLength];
@@ -359,6 +360,7 @@ int main(void)
 			Message msg("SHUTDOWN");
 			msg.send(myAddress, commandParser);
 			msg.send(myAddress, pointAdder);
+			msg.send(myAddress, apiAddress);
 			cout << "Exiting " << myAddress << endl;
 		};
 
@@ -420,6 +422,73 @@ int main(void)
 
 	};
 
+	auto apiServerLambda = [apiAddress, transceiver](void) -> void
+	{
+		Address myAddress = apiAddress;
+		Socket server;
+		int ret = 0;
+		std::list<Socket*> clients;
+		std::size_t bufferLength = 1024;
+		char* buffer = new char[bufferLength];
+
+		do
+		{
+			usleep(300);
+			ret = server.bind("60000", "127.0.0.1");
+		} while (ret == EAGAIN);
+
+		while (server.connected())
+		{
+			if (PostOffice::instance()->checkMail(myAddress))
+			{
+				break;
+			}
+
+			Socket* client = server.accept();
+			if (client && client->connected())
+			{
+				clients.push_back(client);
+			}
+
+			if (clients.empty())
+			{
+				usleep(300);
+				continue;
+			}
+
+			client = clients.front();
+			clients.pop_front();
+			
+			if (!client->connected())
+			{
+				delete client;
+				continue;
+			}
+
+			int receivedBytes = client->receive(buffer, bufferLength - 1);
+			clients.push_back(client);
+
+			if (receivedBytes == 0)
+			{
+				usleep(30);
+				continue;
+			}
+			buffer[receivedBytes] = '\0';
+
+			std::string message = "PRIVMSG #betawar1305 :" + string(buffer, bufferLength) + "\r\n";
+			Message msg(message);
+			msg.send(myAddress, transceiver);
+		}
+
+		delete [] buffer;
+		for (Socket*& client : clients)
+		{
+			delete client;
+			client = NULL;
+		}
+		server.close();
+	};
+
 	int connectionRet = twitchConnection.connect("irc.chat.twitch.tv", "6667");
 	cout << "Connection return value: " << connectionRet << endl;
 
@@ -441,6 +510,7 @@ int main(void)
 	threads.push_back(std::thread(transceiverLambda));
 	threads.push_back(std::thread(commandParserLambda));
 	threads.push_back(std::thread(pointAdderLambda));
+	threads.push_back(std::thread(apiServerLambda));
 
 	for (std::thread& t : threads)
 	{

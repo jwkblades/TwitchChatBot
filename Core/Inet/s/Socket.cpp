@@ -13,12 +13,83 @@ Socket::Socket(void):
 	// empty
 }
 
+Socket::Socket(int sock):
+	mConnected(true),
+	mInvalid(false),
+	mReadReady(false),
+	mReadyReadyOOB(false),
+	mWriteReady(false),
+	mTimedout(false),
+	mSocket(sock),
+	mReceivedBytes(0)
+{
+	// empty
+}
+
 Socket::~Socket(void)
 {
 	if (mConnected)
 	{
 		close();
 	}
+}
+
+int Socket::bind(const char* port, const char* ip)
+{
+	addrinfo hints;
+	addrinfo* res;
+	int ret;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET; //AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+
+	if (getaddrinfo(ip, port, &hints, &res) != 0)
+	{
+		cerr << "Getaddrinfo error " << errno << endl;
+		freeaddrinfo(res);
+		return -1;
+	}
+
+	for (addrinfo* p = res; p != NULL; p = p->ai_next)
+	{
+		mSocket = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+		if (mSocket == -1)
+		{
+			continue;
+		}
+		if (::bind(mSocket, res->ai_addr, res->ai_addrlen) == -1)
+		{
+			::close(mSocket);
+			mSocket = -1;
+			cerr << "Unable to bind " << errno << " " << strerror(errno) << endl;
+			continue;
+		}
+		break;
+	}
+	freeaddrinfo(res);
+
+	if (mSocket == -1)
+	{
+		return EAGAIN;
+	}
+
+	ret = ::listen(mSocket, SOCKET_CONNECTION_LIMIT);
+	mConnected = (ret == 0);
+	return ret;
+}
+
+Socket* Socket::accept(void)
+{
+	sockaddr_storage connInfo;
+	socklen_t addrlen = sizeof(connInfo);
+	int nsock = ::accept(mSocket, (sockaddr*)&connInfo, &addrlen);
+	if (nsock == -1)
+	{
+		return NULL;
+	}
+	return new Socket(nsock);
 }
 
 bool Socket::connected(void) const
