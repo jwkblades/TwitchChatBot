@@ -3,6 +3,7 @@
 #include "Throttler.h"
 #include "ScopeExit.h"
 #include "utils.h"
+#include "CommandSet.h"
 
 #include "json/src/json.hpp"
 
@@ -17,12 +18,15 @@ using namespace std;
 
 int main(void)
 {
-
+	CommandSet mCommands;
 	Socket twitchConnection;
 	Address commandParser("commandParser");
 	Address transceiver("transceiver");
 	Address pointAdder("pointAdder");
 	Address apiAddress("apiServer");
+
+	std::list<std::string> membersInRaffle;
+	bool raffleOpen = false;
 
 	auto pointAdderLambda = [pointAdder, commandParser](void) -> void
 	{
@@ -163,20 +167,16 @@ int main(void)
 			}
 		};
 	};
-	auto commandParserLambda = [commandParser, pointAdder, transceiver](void) -> void
+	auto commandParserLambda = [&mCommands, commandParser, pointAdder, transceiver](void) -> void
 	{
 		PostOffice* postOffice = PostOffice::instance();
 		Address myAddress = commandParser;
 		SCOPE_EXIT [&](){ cout << "Exiting " << myAddress << endl; };
 
 		Throttler namesTimeout(std::chrono::seconds(60));
-
 		std::string command = "";
 		std::string prefix = "";
 		std::vector<std::string> params;
-
-		std::list<std::string> membersInRaffle;
-		bool raffleOpen = false;
 
 		while (command != "SHUTDOWN")
 		{
@@ -209,107 +209,17 @@ int main(void)
 			}
 			else if (command == "PRIVMSG")
 			{
+				std::string user = split(prefix.substr(1), "!").at(0);
 				std::string channel = params.front();
-				if (params.back() == "!points")
+				params.erase(params.begin());
+
+				if (!mCommands.run(user, channel, params))
 				{
-					nlohmann::json points = nlohmann::json::object();
-					std::ifstream jsonIn("members.json");
-					if (jsonIn.good())
-					{
-						jsonIn >> points;
-					}
-					jsonIn.close();
-
-					std::string user = split(prefix.substr(1), "!").at(0);
-					Message pointInfo("GET_POINTS " + user);
-					Message response = pointInfo.sendAndAwaitResponse(myAddress, pointAdder);
-					if (response.size() == 0)
-					{
-						Message msg("PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
-						msg.send(myAddress, transceiver);
-					}
-					std::string pointValue(response.raw(), response.size());
-
-					cout << "Retrieving points for '" << user << "' on " << channel << endl;
-					if (pointValue == "0")
-					{
-						Message msg("PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
-						msg.send(myAddress, transceiver);
-					}
-					else
-					{
-						Message msg("PRIVMSG " + channel + " :@" + user + ", your point total is " + pointValue + ".\r\n");
-						msg.send(myAddress, transceiver);
-					}
+					cout << "Unable to run command..." << endl;
 				}
-				else if (params.back() == "!raffleStart")
+				else
 				{
-					std::string user = split(prefix.substr(1), "!").at(0);
-					Message msg("GETROLE " + user + " PRIVMSG " + join(params, " "));
-					Message response = msg.sendAndAwaitResponse(myAddress, pointAdder);
-					if (response.size() == 0)
-					{
-						continue;
-					}
-					CommandParts cmdParts = parseCommand(response);
-					if (!cmdParts.valid)
-					{
-						continue;
-					}
-					command = cmdParts.command;
-					prefix = cmdParts.prefix;
-					params = cmdParts.params;
-					role = params.at(0);
-					cout << "=== Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(params, "', '") << "'], Role='" << role << "'" << endl;
-
-					if (role == "+o")
-					{
-						raffleOpen = true;
-						Message msg("PRIVMSG " + channel + " :The raffle is now open! Send '!joinRaffle' (no quotes) to join.\r\n");
-						msg.send(myAddress, transceiver);
-					}
-					else
-					{
-						Message msg("PRIVMSG " + channel + " :@" + user + ", you don't have permissions to execute that command.\r\n");
-						msg.send(myAddress, transceiver);
-					}
-				}
-				else if (params.back() == "!joinRaffle")
-				{
-					/*
-					 * NOTE This isn't done per-say. It has a drastic flaw in that it doesn't
-					 *      actually cost points to join the raffle. We will want to change
-					 *      that. But given that I don't really like the way the asynchronous
-					 *      messaging is working out with the GETROLE side of things, I am
-					 *      going to take some time to architect this and come back with a
-					 *      better option.
-					 */
-					std::string user = split(prefix.substr(1), "!").at(0);
-					Message msg("DEDUCT_POINTS " + user);
-					Message response = msg.sendAndAwaitResponse(myAddress, pointAdder);
-					if (response.size() == 0)
-					{
-						continue;
-					}
-					CommandParts cmdParts = parseCommand(response);
-					if (!cmdParts.valid)
-					{
-						continue;
-					}
-					command = cmdParts.command;
-					prefix = cmdParts.prefix;
-					params = cmdParts.params;
-					if (command == "DEDUCT_SUCCESS")
-					{
-						membersInRaffle.push_back(user);
-						Message msg("PRIVMSG " + channel + " :@" + user + ", you are now in the raffle.\r\n");
-						msg.send(myAddress, transceiver);
-					}
-					else
-					{
-						Message msg("PRIVMSG " + channel + " :@" + user + ", Sorry, but the command timed out... Please try again.\r\n");
-						msg.send(myAddress, transceiver);
-					}
+					cout << "Command ran succesffully!" << endl;
 				}
 			}
 			else if (command == "JOIN" || command == "PART")
@@ -510,6 +420,114 @@ int main(void)
 			client = NULL;
 		}
 	};
+
+
+	mCommands.registerCommand({"!shutdown", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+		if (user == "betawar1305")
+		{
+			Message msg("SHUTDOWN");
+			msg.send(commandParser, transceiver);
+		}
+	}});
+
+	mCommands.registerCommand({"!points", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+		nlohmann::json points = nlohmann::json::object();
+		std::ifstream jsonIn("members.json");
+		if (jsonIn.good())
+		{
+			jsonIn >> points;
+		}
+		jsonIn.close();
+
+		Message pointInfo("GET_POINTS " + user);
+		Message response = pointInfo.sendAndAwaitResponse(commandParser, pointAdder);
+		if (response.size() == 0)
+		{
+			Message msg("PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
+			msg.send(commandParser, transceiver);
+		}
+		std::string pointValue(response.raw(), response.size());
+
+		cout << "Retrieving points for '" << user << "' on " << channel << endl;
+		if (pointValue == "0")
+		{
+			Message msg("PRIVMSG " + channel + " :@" + user + ", your currently have no points.\r\n");
+			msg.send(commandParser, transceiver);
+		}
+		else
+		{
+			Message msg("PRIVMSG " + channel + " :@" + user + ", your point total is " + pointValue + ".\r\n");
+			msg.send(commandParser, transceiver);
+		}
+	}});
+
+	mCommands.registerCommand({"!startRaffle", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+		Message msg("GETROLE " + user + " PRIVMSG " + join(params, " "));
+		Message response = msg.sendAndAwaitResponse(commandParser, pointAdder);
+		if (response.size() == 0)
+		{
+			return;
+		}
+		CommandParts cmdParts = parseCommand(response);
+		if (!cmdParts.valid)
+		{
+			return;
+		}
+
+		std::string command = cmdParts.command;
+		std::string prefix = cmdParts.prefix;
+		std::vector<std::string> parms = cmdParts.params;
+		std::string role = parms.at(0);
+		cout << "=== Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(parms, "', '") << "'], Role='" << role << "'" << endl;
+
+		if (role == "+o")
+		{
+			raffleOpen = true;
+			Message msg("PRIVMSG " + channel + " :The raffle is now open! Send '!joinRaffle' (no quotes) to join.\r\n");
+			msg.send(commandParser, transceiver);
+		}
+		else
+		{
+			Message msg("PRIVMSG " + channel + " :@" + user + ", you don't have permissions to execute that command.\r\n");
+			msg.send(commandParser, transceiver);
+		}
+	}});
+
+	mCommands.registerCommand({"!joinRaffle", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+		/*
+		 * NOTE This isn't done per-say. It has a drastic flaw in that it doesn't
+		 *      actually cost points to join the raffle. We will want to change
+		 *      that. But given that I don't really like the way the asynchronous
+		 *      messaging is working out with the GETROLE side of things, I am
+		 *      going to take some time to architect this and come back with a
+		 *      better option.
+		 */
+		Message msg("DEDUCT_POINTS " + user);
+		Message response = msg.sendAndAwaitResponse(commandParser, pointAdder);
+		if (response.size() == 0)
+		{
+			return;
+		}
+		CommandParts cmdParts = parseCommand(response);
+		if (!cmdParts.valid)
+		{
+			return;
+		}
+		std::string command = cmdParts.command;
+		std::string prefix = cmdParts.prefix;
+		std::vector<std::string> parms = cmdParts.params;
+		if (command == "DEDUCT_SUCCESS")
+		{
+			membersInRaffle.push_back(user);
+			Message msg("PRIVMSG " + channel + " :@" + user + ", you are now in the raffle.\r\n");
+			msg.send(commandParser, transceiver);
+		}
+		else
+		{
+			Message msg("PRIVMSG " + channel + " :@" + user + ", Sorry, but the command timed out... Please try again.\r\n");
+			msg.send(commandParser, transceiver);
+		}
+	}});
 
 	int connectionRet = twitchConnection.connect("irc.chat.twitch.tv", "6667");
 	cout << "Connection return value: " << connectionRet << endl;
