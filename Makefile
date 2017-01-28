@@ -1,23 +1,29 @@
-FLAGS:=-Wall -pedantic -std=c++11 -pthread
-CC:=g++
-EXE=$(shell basename ${CURDIR})
+COMPONENTS:=Core
+DEPDIR := build
+INCDIR := i
+LIBS := -pthread
+FLAGS = -Wall -pedantic -std=c++11 ${LIBS} -I3rdParty ${INC}
+CC := g++
+EXE = $(shell basename ${CURDIR})
 
-DEPDIR := deps
-SRCS := $(shell ag -g '\.[ci]pp' --ignore-dir json/ --nocolor)
+INC := $(foreach directory, $(shell find ${COMPONENTS} -name "${INCDIR}" -a -type d), -I${directory})
+SRCS := $(shell ag -g '\.cpp' --ignore-dir json/ --nocolor)
 OBJS := $(SRCS:.cpp=.o)
 OBJS := $(OBJS:.ipp=.o)
-OBJS := $(patsubst ./%,%,${OBJS})
-OBJS := $(patsubst %,${DEPDIR}/%,${OBJS})
+OBJS := $(patsubst ./%, %, ${OBJS})
+OBJS := $(patsubst %, ${DEPDIR}/%, ${OBJS})
 $(shell mkdir -p ${DEPDIR} >/dev/null)
-DEPFLAGS = -MT $@ -MMD -MP -MF ${DEPDIR}/$*.d
+DEPFLAGS = -MT $@ -MMD -MF ${DEPDIR}/$*.d
 COMPILE.cc = ${CC} ${DEPFLAGS} ${FLAGS} -c
 
-${DEPDIR}/%.o : %.cpp
-${DEPDIR}/%.o : %.cpp ${DEPDIR}/%.d
+${DEPDIR}/%.o: %.cpp
+${DEPDIR}/%.o: %.cpp ${DEPDIR}/%.d
+	@mkdir -p $(shell dirname $@)
 	${COMPILE.cc} ${OUTPUT_OPTION} $<
 
-${DEPDIR}/%.o : %.ipp
-${DEPDIR}/%.o : %.ipp ${DEPDIR}/%.d
+${DEPDIR}/%.o: %.ipp
+${DEPDIR}/%.o: %.ipp ${DEPDIR}/%.d
+	@mkdir -p $(shell dirname $@)
 	${COMPILE.cc} ${OUTPUT_OPTION} $<
 
 ${EXE}: ${OBJS}
