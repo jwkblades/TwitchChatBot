@@ -422,14 +422,12 @@ int main(void)
 
 	};
 
-	auto apiServerLambda = [apiAddress, transceiver](void) -> void
+	std::list<Socket*> clients;
+	auto apiServerLambda = [&clients, apiAddress](void) -> void
 	{
 		Address myAddress = apiAddress;
 		Socket server;
 		int ret = 0;
-		std::list<Socket*> clients;
-		std::size_t bufferLength = 1024;
-		char* buffer = new char[bufferLength];
 
 		do
 		{
@@ -447,17 +445,37 @@ int main(void)
 			Socket* client = server.accept();
 			if (client && client->connected())
 			{
+				RAIIMutex clientsLock(&clients);
 				clients.push_back(client);
 			}
+		}
+		server.close();
+	};
 
+	auto apiLoopLambda = [&clients, apiAddress, transceiver](void) -> void
+	{
+		Address myAddress = apiAddress;
+		std::size_t bufferLength = 1024;
+		char* buffer = new char[bufferLength];
+		Socket* client;
+
+		while (true)
+		{
+			if (PostOffice::instance()->checkMail(myAddress))
+			{
+				break;
+			}
 			if (clients.empty())
 			{
 				usleep(300);
 				continue;
 			}
 
-			client = clients.front();
-			clients.pop_front();
+			{
+				RAIIMutex clientsLock(&clients);
+				client = clients.front();
+				clients.pop_front();
+			}
 			
 			if (!client->connected())
 			{
@@ -466,7 +484,14 @@ int main(void)
 			}
 
 			int receivedBytes = client->receive(buffer, bufferLength - 1);
-			clients.push_back(client);
+			std::string resp = ".";
+			client->send(resp.c_str(), resp.size() + 1);
+			//cerr << "---- Received " << receivedBytes << " bytes from api server." << endl;
+
+			{
+				RAIIMutex clientsLock(&clients);
+				clients.push_back(client);
+			}
 
 			if (receivedBytes == 0)
 			{
@@ -475,18 +500,19 @@ int main(void)
 			}
 			buffer[receivedBytes] = '\0';
 
-			std::string message = "PRIVMSG #betawar1305 :" + string(buffer, bufferLength) + "\r\n";
+			std::string message = "PRIVMSG #betawar1305 :" + string(buffer, receivedBytes) + "\r\n";
+			//cerr << "---- Message from api server: '" << message << "'" << endl;
 			Message msg(message);
 			msg.send(myAddress, transceiver);
 		}
 
 		delete [] buffer;
+		RAIIMutex clientsLock(&clients);
 		for (Socket*& client : clients)
 		{
 			delete client;
 			client = NULL;
 		}
-		server.close();
 	};
 
 	int connectionRet = twitchConnection.connect("irc.chat.twitch.tv", "6667");
@@ -511,6 +537,7 @@ int main(void)
 	threads.push_back(std::thread(commandParserLambda));
 	threads.push_back(std::thread(pointAdderLambda));
 	threads.push_back(std::thread(apiServerLambda));
+	threads.push_back(std::thread(apiLoopLambda));
 
 	for (std::thread& t : threads)
 	{

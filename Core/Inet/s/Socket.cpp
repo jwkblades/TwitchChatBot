@@ -177,6 +177,7 @@ int Socket::receive(char* buffer, int bufferLength, int timeout)
 		checkForReady(POLLIN | POLLPRI, timeout);
 		if (!mConnected)
 		{
+			cerr << "Socket not connected." << endl;
 			received = 0;
 			break;
 		}
@@ -196,12 +197,14 @@ int Socket::receive(char* buffer, int bufferLength, int timeout)
 
 			if (ret == 0 /* Other side shut down */)
 			{
+				cerr << "Socket shut down by other side." << endl;
 				received = 0;
 				mConnected = false;
 				break;
 			}
 			else if (ret < 0)
 			{
+				cerr << "Fewer than 0 bytes received." << endl;
 				received = 0;
 				return -1;
 			}
