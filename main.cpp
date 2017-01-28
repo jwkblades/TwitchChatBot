@@ -484,9 +484,6 @@ int main(void)
 			}
 
 			int receivedBytes = client->receive(buffer, bufferLength - 1);
-			std::string resp = ".";
-			client->send(resp.c_str(), resp.size() + 1);
-			//cerr << "---- Received " << receivedBytes << " bytes from api server." << endl;
 
 			{
 				RAIIMutex clientsLock(&clients);
@@ -501,7 +498,6 @@ int main(void)
 			buffer[receivedBytes] = '\0';
 
 			std::string message = "PRIVMSG #betawar1305 :" + string(buffer, receivedBytes) + "\r\n";
-			//cerr << "---- Message from api server: '" << message << "'" << endl;
 			Message msg(message);
 			msg.send(myAddress, transceiver);
 		}

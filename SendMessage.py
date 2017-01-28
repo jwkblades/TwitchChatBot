@@ -1,14 +1,12 @@
 #!/usr/bin/python
 import socket
+import sys
 import time
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
 client.connect(("localhost", 60000));
-print "Message: ";
-msg = raw_input();
-sent = client.send(msg);
-print "Sent: {0:d} bytes\n".format(sent);
-time.sleep(1);
-resp = client.recv(1024);
-print "Received response: '{0:s}'\n".format(resp);
+m = " ".join(sys.argv[1:]);
+sent = client.send(m);
+print "Sent: {0:d} bytes '{1:s}'\n".format(sent, m);
+time.sleep(.1);
 client.close();

@@ -1,4 +1,4 @@
 TwitchChatBot
 *.o
 *.*.sw*
-deps/
+build/
