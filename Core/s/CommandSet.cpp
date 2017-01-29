@@ -1,17 +1,22 @@
 #include "CommandSet.h"
 
-#include <iostream>
-using namespace std;
-
 bool CommandSet::registerCommand(Command cmd)
 {
-	cout << "=== Registering command: '" << cmd.name() << "'" << endl;
 	return mCommands.insert({cmd.name(), cmd}).second;
+}
+
+std::vector<std::string> CommandSet::help(void) const
+{
+	std::vector<std::string> ret;
+	for (const std::pair<std::string, Command>& cmd : mCommands)
+	{
+		ret.push_back(cmd.second.name() + ", " + cmd.second.desc());
+	}
+	return ret;
 }
 
 bool CommandSet::run(const std::string& name, const std::string& channel, const std::vector<std::string>& params)
 {
-	cout << "=== Attempting to find command '" << params.front() << "' to run user=" << name << ", channel=" << channel << "." << endl;
 	auto iter = mCommands.find(params.front());
 	if (iter == mCommands.end())
 	{

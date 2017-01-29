@@ -29,7 +29,7 @@ public:
 	~Socket(void);
 
 	int bind(const char* port, const char* ip = NULL);
-	Socket* accept(void);
+	Socket* accept(bool block = true);
 
 	bool connected(void) const;
 	int recvLength(void) const;

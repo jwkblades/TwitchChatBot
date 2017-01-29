@@ -1,7 +1,8 @@
 #include "Command.h"
 
-Command::Command(const std::string& commandName, Command::callback_type callback):
+Command::Command(const std::string& commandName, const std::string& desc, Command::callback_type callback):
 	mCommand(commandName),
+	mDescription(desc),
 	mCallback(callback)
 {
 	// empty
@@ -22,3 +23,7 @@ const std::string& Command::name(void) const
 	return mCommand;
 }
 
+const std::string& Command::desc(void) const
+{
+	return mDescription;
+}

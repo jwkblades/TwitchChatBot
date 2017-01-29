@@ -146,7 +146,7 @@ int main(void)
 			}
 			else if (command == "DEDUCT_POINTS" && !parts.empty())
 			{
-				std::string resp = "DEDUCT_FAIL";
+				std::string resp = "FAIL";
 				if (points[parts.at(0)].is_null())
 				{
 					points[parts.at(0)] = nlohmann::json::object();
@@ -158,7 +158,7 @@ int main(void)
 					{
 						value -= 5;
 						points[parts.at(0)]["points"] = value;
-						resp = "DEDUCT_SUCCESS";
+						resp = "SUCCESS";
 					}
 				}
 
@@ -263,6 +263,7 @@ int main(void)
 		Throttler throttle;
 		PostOffice* postOffice = PostOffice::instance();
 		Address myAddress = transceiver;
+		int messagesPerTick = 20;
 
 		SCOPE_EXIT [&](void) -> void
 		{
@@ -277,18 +278,25 @@ int main(void)
 		std::string incompleteMessage = "";
 		while (twitchConnection.connected())
 		{
-			if (PostOffice::isValidInstance(postOffice) && postOffice->checkMail(myAddress) && throttle.check(20))
+			if (PostOffice::isValidInstance(postOffice) && postOffice->checkMail(myAddress) && throttle.check(messagesPerTick))
 			{
 				Message receivedMessage = postOffice->getMail(myAddress);
-
 				std::size_t size = receivedMessage.size();
 				std::size_t sentBytes = 0;
 				const char* ptr = receivedMessage.raw();
 				std::string s(ptr, size);
-				//if (s.find("PASS") == std::string::npos)
-				//{
-				//	cout << "Sending message: '" << ptr << "' to twitch." << endl;
-				//}
+
+				if (s.find("PASS") == std::string::npos)
+				{
+					cout << "Sending message: '" << ptr << "' to twitch." << endl;
+				}
+
+				if (s.find("SHUTDOWN") == 0)
+				{
+					cout << "CLOSING CONNECTION TO TWITCH." << endl;
+					twitchConnection.close();
+					break;
+				}
 
 				do
 				{
@@ -303,6 +311,30 @@ int main(void)
 					sentBytes += sent;
 				} while (sentBytes < size);
 				throttle.addUnit();
+			}
+
+			if (messagesPerTick == 20) // The base number.
+			{
+				Message msg("GETROLE betawar1305 NOOP");
+				Message response = msg.sendAndAwaitResponse(commandParser, pointAdder);
+				if (response.size() == 0)
+				{
+					continue;
+				}
+				CommandParts cmdParts = parseCommand(response);
+				if (!cmdParts.valid)
+				{
+					continue;
+				}
+
+				std::vector<std::string> parms = cmdParts.params;
+				std::string role = parms.at(0);
+
+				if (role == "+o")
+				{
+					messagesPerTick = 100;
+					cout << "!!! We have op on channel, so increasing to 100 messages per 30 seconds." << endl;
+				}
 			}
 
 			int receivedBytes = twitchConnection.receive(buffer, bufferLength - 1);
@@ -349,16 +381,22 @@ int main(void)
 		{
 			if (PostOffice::instance()->checkMail(myAddress))
 			{
+				cout << "Server closing down" << endl;
 				break;
 			}
 
-			Socket* client = server.accept();
+			Socket* client = server.accept(false);
 			if (client && client->connected())
 			{
 				RAIIMutex clientsLock(&clients);
 				clients.push_back(client);
 			}
+			else
+			{
+				usleep(500);
+			}
 		}
+
 		server.close();
 	};
 
@@ -407,7 +445,16 @@ int main(void)
 			}
 			buffer[receivedBytes] = '\0';
 
-			std::string message = "PRIVMSG #betawar1305 :" + string(buffer, receivedBytes) + "\r\n";
+			std::string m(buffer, receivedBytes);
+			std::string message;
+			if (m.find(" ") == std::string::npos)
+			{
+				message = "PRIVMSG #betawar1305 " + m + "\r\n";
+			}
+			else
+			{
+				message = "PRIVMSG #betawar1305 :" + m + "\r\n";
+			}
 			Message msg(message);
 			msg.send(myAddress, transceiver);
 		}
@@ -422,7 +469,20 @@ int main(void)
 	};
 
 
-	mCommands.registerCommand({"!shutdown", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+	mCommands.registerCommand({"!help", "print this help message.",
+		[&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void
+	{
+		std::vector<std::string> commands = mCommands.help();	
+		for (const std::string& cmd : commands)
+		{
+			Message msg("PRIVMSG #betawar1305 : " + cmd + "\r\n");
+			msg.send(commandParser, transceiver);
+		}
+	}});
+
+	mCommands.registerCommand({"!shutdown", "shutdown the bot.",
+		[&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void
+	{
 		if (user == "betawar1305")
 		{
 			Message msg("SHUTDOWN");
@@ -430,7 +490,9 @@ int main(void)
 		}
 	}});
 
-	mCommands.registerCommand({"!points", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+	mCommands.registerCommand({"!points", "return the number of points you have accrued.",
+		[&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void
+	{
 		nlohmann::json points = nlohmann::json::object();
 		std::ifstream jsonIn("members.json");
 		if (jsonIn.good())
@@ -461,7 +523,9 @@ int main(void)
 		}
 	}});
 
-	mCommands.registerCommand({"!startRaffle", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+	mCommands.registerCommand({"!startRaffle", "start a point raffle.",
+		[&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void
+	{
 		Message msg("GETROLE " + user + " PRIVMSG " + join(params, " "));
 		Message response = msg.sendAndAwaitResponse(commandParser, pointAdder);
 		if (response.size() == 0)
@@ -493,7 +557,15 @@ int main(void)
 		}
 	}});
 
-	mCommands.registerCommand({"!joinRaffle", [&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void {
+	mCommands.registerCommand({"!joinRaffle", "join a raffle in progress.",
+		[&](const std::string& user, const std::string& channel, const std::vector<std::string>& params) -> void
+	{
+		if (!raffleOpen)
+		{
+			Message msg("PRIVMSG " + channel + " :@" + user + ", The raffle is not currently open.\r\n");
+			msg.send(commandParser, transceiver);
+			return;
+		}
 		/*
 		 * NOTE This isn't done per-say. It has a drastic flaw in that it doesn't
 		 *      actually cost points to join the raffle. We will want to change
@@ -516,7 +588,7 @@ int main(void)
 		std::string command = cmdParts.command;
 		std::string prefix = cmdParts.prefix;
 		std::vector<std::string> parms = cmdParts.params;
-		if (command == "DEDUCT_SUCCESS")
+		if (command == "SUCCESS")
 		{
 			membersInRaffle.push_back(user);
 			Message msg("PRIVMSG " + channel + " :@" + user + ", you are now in the raffle.\r\n");

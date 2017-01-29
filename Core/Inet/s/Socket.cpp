@@ -80,11 +80,18 @@ int Socket::bind(const char* port, const char* ip)
 	return ret;
 }
 
-Socket* Socket::accept(void)
+Socket* Socket::accept(bool block)
 {
+	fd_set rset;
 	sockaddr_storage connInfo;
 	socklen_t addrlen = sizeof(connInfo);
-	int nsock = ::accept(mSocket, (sockaddr*)&connInfo, &addrlen);
+	int nsock = -1; 
+
+	if (block && FD_ISSET(mSocket, &rset))
+	{
+		nsock = ::accept(mSocket, (sockaddr*)&connInfo, &addrlen);
+	}
+
 	if (nsock == -1)
 	{
 		return NULL;
