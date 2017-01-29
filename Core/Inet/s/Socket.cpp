@@ -87,7 +87,7 @@ Socket* Socket::accept(bool block)
 	socklen_t addrlen = sizeof(connInfo);
 	int nsock = -1; 
 
-	if (block && FD_ISSET(mSocket, &rset))
+	if (block || FD_ISSET(mSocket, &rset))
 	{
 		nsock = ::accept(mSocket, (sockaddr*)&connInfo, &addrlen);
 	}
