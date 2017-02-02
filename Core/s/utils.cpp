@@ -46,6 +46,7 @@ CommandParts parseCommand(const Message& incoming)
 {
 	std::string command = std::string(incoming.raw(), incoming.size() - 1);
 	std::string prefix = "";
+	std::string state = "";
 	std::vector<std::string> params;
 
 	std::vector<std::string> parts = split(command, " ");
@@ -54,7 +55,13 @@ CommandParts parseCommand(const Message& incoming)
 		return {false, {}, {}, {}};
 	}
 
-	if(parts.at(0).at(0) == ':')
+	if (parts.at(0).at(0) == '@')
+	{
+		state = parts.at(0);
+		parts.erase(parts.begin());
+	}
+
+	if (parts.at(0).at(0) == ':')
 	{
 		// We have a prefix, meaning that the second item (if it exists) is the command.
 		prefix = parts.at(0);
@@ -63,7 +70,7 @@ CommandParts parseCommand(const Message& incoming)
 
 	if (parts.empty())
 	{
-		return {false, {}, {}, {}};
+		return {false, {}, {}, {}, {}};
 	}
 
 	command = parts.at(0);
@@ -86,6 +93,7 @@ CommandParts parseCommand(const Message& incoming)
 	return {
 		true,
 		command,
+		state,
 		prefix,
 		params
 	};

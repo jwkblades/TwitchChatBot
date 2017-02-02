@@ -176,6 +176,7 @@ int main(void)
 		Throttler namesTimeout(std::chrono::seconds(60));
 		std::string command = "";
 		std::string prefix = "";
+		std::string state = "";
 		std::vector<std::string> params;
 
 		while (command != "SHUTDOWN")
@@ -199,9 +200,10 @@ int main(void)
 			}
 			command = cmdParts.command;
 			prefix = cmdParts.prefix;
+			state = cmdParts.state;
 			params = cmdParts.params;
 
-			cout << "Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(params, "', '") << "']" << endl;
+			cout << "State='" << state << "' Prefix='" << prefix << "' Command='" << command << "' Params=['" << join(params, "', '") << "']" << endl;
 			if (command == "PING")
 			{
 				Message msg("PONG " + join(params, " ") + "\r\n");
@@ -213,14 +215,7 @@ int main(void)
 				std::string channel = params.front();
 				params.erase(params.begin());
 
-				if (!mCommands.run(user, channel, params))
-				{
-					cout << "Unable to run command..." << endl;
-				}
-				else
-				{
-					cout << "Command ran succesffully!" << endl;
-				}
+				mCommands.run(user, channel, params);
 			}
 			else if (command == "JOIN" || command == "PART")
 			{
@@ -235,7 +230,11 @@ int main(void)
 			}
 			else if (command == "376") // the end of the MOTD message.
 			{
-				Message msg("CAP REQ twitch.tv/membership\r\n");
+				Message msg("CAP REQ twitch.tv/commands\r\n");
+				msg.send(myAddress, transceiver);
+				msg = Message("CAP REQ twitch.tv/membership\r\n");
+				msg.send(myAddress, transceiver);
+				msg = Message("CAP REQ twitch.tv/tags\r\n");
 				msg.send(myAddress, transceiver);
 				msg = Message("JOIN #betawar1305\r\n");
 				msg.send(myAddress, transceiver);
@@ -381,7 +380,7 @@ int main(void)
 		{
 			if (PostOffice::instance()->checkMail(myAddress))
 			{
-				cout << "Server closing down" << endl;
+				cout << "########## API Server closing down" << endl;
 				break;
 			}
 
@@ -411,6 +410,7 @@ int main(void)
 		{
 			if (PostOffice::instance()->checkMail(myAddress))
 			{
+				cout << "########## API Loop closing down" << endl;
 				break;
 			}
 			if (clients.empty())
@@ -432,6 +432,7 @@ int main(void)
 			}
 
 			int receivedBytes = client->receive(buffer, bufferLength - 1);
+			client->send(".", 2);
 
 			{
 				RAIIMutex clientsLock(&clients);
@@ -447,7 +448,14 @@ int main(void)
 
 			std::string m(buffer, receivedBytes);
 			std::string message;
-			if (m.find(" ") == std::string::npos)
+
+			cout << "API server received '" << m << "'" << endl;
+
+			if (m == "SHUTDOWN")
+			{
+				message = m;
+			}
+			else if (m.find(" ") == std::string::npos)
 			{
 				message = "PRIVMSG #betawar1305 " + m + "\r\n";
 			}

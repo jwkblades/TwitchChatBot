@@ -87,6 +87,18 @@ Socket* Socket::accept(bool block)
 	socklen_t addrlen = sizeof(connInfo);
 	int nsock = -1; 
 
+	FD_ZERO(&rset);
+	FD_SET(mSocket, &rset);
+
+	timeval timeout = {0, 30};
+	int selectVal = ::select(mSocket + 1, &rset, NULL, NULL, &timeout);
+
+	if (selectVal < 0)
+	{
+		std::cerr << "Error encountered in ::select " << errno << ", " << strerror(errno) << std::endl;
+		return NULL;
+	}
+
 	if (block || FD_ISSET(mSocket, &rset))
 	{
 		nsock = ::accept(mSocket, (sockaddr*)&connInfo, &addrlen);

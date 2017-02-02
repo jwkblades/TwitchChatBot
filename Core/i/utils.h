@@ -15,6 +15,7 @@ struct CommandParts
 public:
 	bool valid;
 	std::string command;
+	std::string state;
 	std::string prefix;
 	std::vector<std::string> params;
 };
