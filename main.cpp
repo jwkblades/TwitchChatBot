@@ -19,7 +19,6 @@ using namespace std;
 int main(void)
 {
 	CommandSet mCommands;
-	Socket twitchConnection;
 	Address commandParser("commandParser");
 	Address transceiver("transceiver");
 	Address pointAdder("pointAdder");
@@ -255,8 +254,32 @@ int main(void)
 		}
 	};
 
-	auto transceiverLambda = [&twitchConnection, commandParser, transceiver, pointAdder, apiAddress](void) -> void
+	auto transceiverLambda = [commandParser, transceiver, pointAdder, apiAddress](void) -> void
 	{
+		Socket twitchConnection;
+		int connectionRet = twitchConnection.connect("irc.chat.twitch.tv", "6667");
+		SCOPE_EXIT [&](void) -> void
+		{
+			twitchConnection.close();
+		};
+		cout << "Connection return value: " << connectionRet << endl;
+
+		ifstream fileIn("/home/james/.twitch_oauth.key");
+		std::string oauthToken = "";
+		if (!fileIn.is_open())
+		{
+			cout << "ERROR: Unable to open file..." << endl;
+		}
+		fileIn >> oauthToken;
+		fileIn.close();
+
+		Message pass("PASS " + oauthToken + "\r\n");
+		pass.send(transceiver, transceiver);
+		Message nick("NICK betawar1305\r\n");
+		nick.send(transceiver, transceiver);
+
+		// This is where the real body of the transceiver goes, now that we have an
+		// open connection to twitch IRC.
 		const int bufferLength = 1024;
 		char* buffer = new char[bufferLength];
 		Throttler throttle;
@@ -363,16 +386,33 @@ int main(void)
 
 	};
 
-	std::list<Socket*> clients;
-	auto apiServerLambda = [&clients, apiAddress](void) -> void
+	auto apiServerLambda = [transceiver, apiAddress](void) -> void
 	{
 		Address myAddress = apiAddress;
 		Socket server;
+		std::list<Socket*> clients;
+		std::size_t bufferLength = 1024;
+		char* buffer = new char[bufferLength];
 		int ret = 0;
+
+		SCOPE_EXIT [&](void) -> void
+		{
+			delete [] buffer;
+
+			server.close();
+			for (Socket*& client : clients)
+			{
+				delete client;
+				client = NULL;
+			}
+		};
 
 		do
 		{
-			usleep(300);
+			if (ret == EAGAIN)
+			{
+				usleep(300);
+			}
 			ret = server.bind("60000", "127.0.0.1");
 		} while (ret == EAGAIN);
 
@@ -387,44 +427,16 @@ int main(void)
 			Socket* client = server.accept(false);
 			if (client && client->connected())
 			{
-				RAIIMutex clientsLock(&clients);
 				clients.push_back(client);
 			}
-			else
+			else if (clients.empty())
 			{
 				usleep(500);
-			}
-		}
-
-		server.close();
-	};
-
-	auto apiLoopLambda = [&clients, apiAddress, transceiver](void) -> void
-	{
-		Address myAddress = apiAddress;
-		std::size_t bufferLength = 1024;
-		char* buffer = new char[bufferLength];
-		Socket* client;
-
-		while (true)
-		{
-			if (PostOffice::instance()->checkMail(myAddress))
-			{
-				cout << "########## API Loop closing down" << endl;
-				break;
-			}
-			if (clients.empty())
-			{
-				usleep(300);
 				continue;
 			}
 
-			{
-				RAIIMutex clientsLock(&clients);
-				client = clients.front();
-				clients.pop_front();
-			}
-			
+			client = clients.front();
+			clients.pop_front();
 			if (!client->connected())
 			{
 				delete client;
@@ -433,24 +445,17 @@ int main(void)
 
 			int receivedBytes = client->receive(buffer, bufferLength - 1);
 			client->send(".", 2);
-
-			{
-				RAIIMutex clientsLock(&clients);
-				clients.push_back(client);
-			}
+			clients.push_back(client);
 
 			if (receivedBytes == 0)
 			{
-				usleep(30);
 				continue;
 			}
 			buffer[receivedBytes] = '\0';
 
 			std::string m(buffer, receivedBytes);
 			std::string message;
-
 			cout << "API server received '" << m << "'" << endl;
-
 			if (m == "SHUTDOWN")
 			{
 				message = m;
@@ -465,14 +470,6 @@ int main(void)
 			}
 			Message msg(message);
 			msg.send(myAddress, transceiver);
-		}
-
-		delete [] buffer;
-		RAIIMutex clientsLock(&clients);
-		for (Socket*& client : clients)
-		{
-			delete client;
-			client = NULL;
 		}
 	};
 
@@ -609,36 +606,18 @@ int main(void)
 		}
 	}});
 
-	int connectionRet = twitchConnection.connect("irc.chat.twitch.tv", "6667");
-	cout << "Connection return value: " << connectionRet << endl;
-
-	ifstream fileIn("/home/james/.twitch_oauth.key");
-	std::string oauthToken = "";
-	if (!fileIn.is_open())
-	{
-		cout << "ERROR: Unable to open file..." << endl;
-	}
-	fileIn >> oauthToken;
-	fileIn.close();
-
-	Message pass("PASS " + oauthToken + "\r\n");
-	pass.send(transceiver, transceiver);
-	Message nick("NICK betawar1305\r\n");
-	nick.send(transceiver, transceiver);
 
 	std::list<std::thread> threads;
 	threads.push_back(std::thread(transceiverLambda));
 	threads.push_back(std::thread(commandParserLambda));
 	threads.push_back(std::thread(pointAdderLambda));
 	threads.push_back(std::thread(apiServerLambda));
-	threads.push_back(std::thread(apiLoopLambda));
 
 	for (std::thread& t : threads)
 	{
 		t.join();
 	}
 
-	twitchConnection.close();
 	PostOffice::finalize();
 
 	return 0;
