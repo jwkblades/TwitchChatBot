@@ -411,7 +411,7 @@ int main(void)
 		{
 			if (ret == EAGAIN)
 			{
-				usleep(300);
+				usleep(500000);
 			}
 			ret = server.bind("60000", "127.0.0.1");
 		} while (ret == EAGAIN);

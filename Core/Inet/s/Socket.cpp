@@ -52,6 +52,7 @@ int Socket::bind(const char* port, const char* ip)
 		return -1;
 	}
 
+	int socketReuseValue = 1;
 	for (addrinfo* p = res; p != NULL; p = p->ai_next)
 	{
 		mSocket = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
@@ -59,11 +60,19 @@ int Socket::bind(const char* port, const char* ip)
 		{
 			continue;
 		}
-		if (::bind(mSocket, res->ai_addr, res->ai_addrlen) == -1)
+
+		if (::setsockopt(mSocket, SOL_SOCKET, SO_REUSEADDR, &socketReuseValue, sizeof(socketReuseValue)) == -1)
 		{
+			cerr << "Unable to reuse socket " << errno << " " << strerror(errno) << endl;
 			::close(mSocket);
 			mSocket = -1;
+			continue;
+		}
+		if (::bind(mSocket, res->ai_addr, res->ai_addrlen) == -1)
+		{
 			cerr << "Unable to bind " << errno << " " << strerror(errno) << endl;
+			::close(mSocket);
+			mSocket = -1;
 			continue;
 		}
 		break;
