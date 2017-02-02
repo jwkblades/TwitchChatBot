@@ -444,7 +444,6 @@ int main(void)
 			}
 
 			int receivedBytes = client->receive(buffer, bufferLength - 1);
-			client->send(".", 2);
 			clients.push_back(client);
 
 			if (receivedBytes == 0)
